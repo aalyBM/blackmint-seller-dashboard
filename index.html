@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="shopify-api-key" content="c1c9529ec7135ed79c715e1b1ac34e4a">
+  <title>Authorized Sellers</title>
+  <!-- App Bridge must be the first script, loaded synchronously. -->
+  <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+  <script src="https://cdn.shopify.com/shopifycloud/polaris.js"></script>
+  <!-- Where the API lives. Absent on Netlify (same-origin /api/*); set on GitHub Pages. -->
+  <script src="config.js" onerror="window.BM_CONFIG = window.BM_CONFIG || {}"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --surface-1: #ffffff;
+      --surface-2: #f7f7f7;
+      --border: #e3e3e3;
+      --text-primary: #303030;
+      --text-secondary: #616161;
+      --text-muted: #8a8a8a;
+      --grid: #ebebeb;
+      /* Validated chart palette: brand hues stepped into the readable band. */
+      --series-noon: #b88c00;
+      --series-raya: #094dec;
+      --series-whatsapp: #168a4a;
+      --magnitude: #094dec;
+    }
+
+    body { margin: 0; background: var(--surface-2); color: var(--text-primary); }
+
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+    }
+    .kpi {
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+    .kpi__label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+    .kpi__value { font-size: 26px; font-weight: 650; margin-top: 6px; font-variant-numeric: tabular-nums; }
+    .kpi__note { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+    .chart { position: relative; width: 100%; }
+    .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+    .chart text { font-size: 11px; fill: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .chart .grid line { stroke: var(--grid); stroke-width: 1; }
+    .chart .hit { fill: transparent; cursor: default; }
+    .chart .hit:hover + g rect, .chart .col:hover rect { opacity: .82; }
+
+    .tip {
+      position: absolute;
+      pointer-events: none;
+      background: #1a1a1a;
+      color: #fff;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: nowrap;
+      transform: translate(-50%, calc(-100% - 10px));
+      opacity: 0;
+      transition: opacity .08s;
+      z-index: 5;
+    }
+    .tip.on { opacity: 1; }
+    .tip b { font-weight: 600; }
+    .tip .row { display: flex; align-items: center; gap: 6px; }
+
+    .num { font-variant-numeric: tabular-nums; }
+    .muted { color: var(--text-muted); }
+    .good { color: #0c6b3a; }
+    .bad { color: #b3261e; }
+    .variants { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    .bar-row { display: grid; grid-template-columns: 90px 1fr 70px; gap: 8px; align-items: center; font-size: 13px; margin: 6px 0; }
+    .bar-track { height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; }
+    .bar-fill { height: 100%; background: var(--magnitude); border-radius: 4px; }
+    .empty { padding: 24px; text-align: center; color: var(--text-muted); }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; justify-content: space-between; }
+  </style>
+</head>
+<body>
+  <s-page heading="Authorized Sellers">
+    <s-section>
+      <div class="toolbar">
+        <s-select id="range" label="Period">
+          <s-option value="1">Today</s-option>
+          <s-option value="7">Last 7 days</s-option>
+          <s-option value="30" selected>Last 30 days</s-option>
+          <s-option value="90">Last 90 days</s-option>
+        </s-select>
+        <s-text id="generated" color="subdued"></s-text>
+      </div>
+    </s-section>
+
+    <s-section heading="Clicks to other sellers">
+      <div class="kpis" id="kpis"></div>
+    </s-section>
+
+    <s-section heading="Clicks by day">
+      <div class="legend" id="legend"></div>
+      <div class="chart" id="daily"></div>
+    </s-section>
+
+    <s-section heading="Top products">
+      <s-stack direction="inline" gap="base" justifyContent="space-between" alignItems="center">
+        <s-text color="subdued">Ranked by total clicks. Views are how often the seller buttons were on screen.</s-text>
+        <s-button id="export" variant="secondary">Export CSV</s-button>
+      </s-stack>
+      <div id="products"></div>
+    </s-section>
+
+    <s-section heading="Who clicks">
+      <div class="split">
+        <div><s-heading>Language</s-heading><div id="locales"></div></div>
+        <div><s-heading>Device</s-heading><div id="devices"></div></div>
+        <div><s-heading>Hour of day (Cairo)</s-heading><div class="chart" id="hours"></div></div>
+      </div>
+    </s-section>
+
+    <s-section heading="Seller prices">
+      <s-stack gap="base">
+        <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+          <s-stack direction="inline" gap="small" id="priceBadges"></s-stack>
+          <s-button id="refresh" variant="primary">Refresh all prices now</s-button>
+        </s-stack>
+        <s-text id="lastRun" color="subdued"></s-text>
+        <div id="changes"></div>
+        <div id="targets"></div>
+      </s-stack>
+    </s-section>
+  </s-page>
+
+  <div class="tip" id="tip" role="tooltip"></div>
+
+  <script type="module">
+    const SERIES = [
+      { key: "noon", label: "Noon", color: "var(--series-noon)" },
+      { key: "raya", label: "Raya", color: "var(--series-raya)" },
+      { key: "whatsapp", label: "WhatsApp (Black Mint)", color: "var(--series-whatsapp)" },
+    ];
+
+    const $ = (id) => document.getElementById(id);
+    const egp = new Intl.NumberFormat("en-EG", { maximumFractionDigits: 0 });
+    const int = new Intl.NumberFormat("en-EG");
+    const money = (minor) => (minor == null ? "—" : `${egp.format(minor / 100)} EGP`);
+    const when = (iso) => (iso ? new Date(iso).toLocaleString("en-GB", { timeZone: "Africa/Cairo", dateStyle: "medium", timeStyle: "short" }) : "never");
+
+    /** DOM builder. Text always goes through textContent — product titles arrive from the public storefront. */
+    function el(tag, attrs = {}, ...children) {
+      const node = tag.includes(":") ? document.createElementNS("http://www.w3.org/2000/svg", tag.split(":")[1]) : document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) {
+        if (v === undefined || v === null || v === false) continue;
+        if (k === "text") node.textContent = String(v);
+        else if (k === "style" && typeof v === "object") Object.assign(node.style, v);
+        else node.setAttribute(k, String(v));
+      }
+      for (const child of children.flat()) {
+        if (child === null || child === undefined || child === false) continue;
+        node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+      }
+      return node;
+    }
+
+    const CONFIG = window.BM_CONFIG || {};
+    const ENDPOINTS = {
+      dashboard: CONFIG.dashboardUrl || "/api/dashboard",
+      refresh: CONFIG.refreshUrl || "/api/refresh",
+    };
+
+    async function api(path, init = {}) {
+      const token = await shopify.idToken();
+      const res = await fetch(path, {
+        ...init,
+        headers: { ...(init.headers || {}), Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      });
+      if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
+      return res.json();
+    }
+
+    // ---------- tooltip ----------
+    const tip = $("tip");
+    function showTip(evt, rows, title) {
+      tip.replaceChildren(
+        el("div", {}, el("b", { text: title })),
+        ...rows.map((r) =>
+          el("div", { class: "row" },
+            r.color ? el("span", { class: "swatch", style: { background: r.color } }) : null,
+            el("span", { text: `${r.label}: ${int.format(r.value)}` })),
+        ),
+      );
+      const host = document.documentElement.getBoundingClientRect();
+      tip.style.left = `${evt.clientX - host.left}px`;
+      tip.style.top = `${evt.clientY - host.top + window.scrollY}px`;
+      tip.classList.add("on");
+    }
+    const hideTip = () => tip.classList.remove("on");
+
+    // ---------- KPIs ----------
+    function renderKpis(t) {
+      const tile = (label, value, note, color) =>
+        el("div", { class: "kpi" },
+          el("div", { class: "kpi__label" }, color ? el("span", { class: "swatch", style: { background: color } }) : null, label),
+          el("div", { class: "kpi__value", text: value }),
+          note ? el("div", { class: "kpi__note", text: note }) : null);
+
+      $("kpis").replaceChildren(
+        tile("Noon clicks", int.format(t.noon), null, "var(--series-noon)"),
+        tile("Raya clicks", int.format(t.raya), null, "var(--series-raya)"),
+        tile("WhatsApp orders", int.format(t.whatsapp), "Black Mint's own button", "var(--series-whatsapp)"),
+        tile("Button views", int.format(t.impressions), "seller buttons on screen"),
+        tile("Click-out rate", t.outboundRate == null ? "—" : `${t.outboundRate}%`, "Noon + Raya clicks ÷ views"),
+        tile("People who clicked", int.format(t.uniqueClickers), "anonymous, where analytics consent was given"),
+      );
+    }
+
+    // ---------- daily stacked bars ----------
+    function renderDaily(daily) {
+      $("legend").replaceChildren(...SERIES.map((s) => el("span", {}, el("span", { class: "swatch", style: { background: s.color } }), s.label)));
+
+      const W = 760, H = 220, padL = 36, padB = 24, padT = 8;
+      const plotW = W - padL, plotH = H - padB - padT;
+      const totals = daily.map((d) => d.noon + d.raya + d.whatsapp);
+      const max = Math.max(1, ...totals);
+      const step = Math.max(1, Math.ceil(max / 4));
+      const top = step * 4;
+      const slot = plotW / daily.length;
+      const barW = Math.max(3, Math.min(28, slot * 0.6));
+      const y = (v) => padT + plotH - (v / top) * plotH;
+
+      const svg = el("svg:svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Clicks per day by seller" });
+      const grid = el("svg:g", { class: "grid" });
+      for (let i = 0; i <= 4; i += 1) {
+        const v = step * i;
+        grid.append(el("svg:line", { x1: padL, x2: W, y1: y(v), y2: y(v) }));
+        grid.append(el("svg:text", { x: padL - 6, y: y(v) + 4, "text-anchor": "end", text: int.format(v) }));
+      }
+      svg.append(grid);
+
+      const labelEvery = Math.ceil(daily.length / 8);
+      daily.forEach((d, i) => {
+        const cx = padL + slot * i + slot / 2;
+        const col = el("svg:g", { class: "col" });
+        let acc = 0;
+        const segments = SERIES.filter((s) => d[s.key] > 0);
+        segments.forEach((s, idx) => {
+          const v = d[s.key];
+          const y0 = y(acc), y1 = y(acc + v);
+          // 2px surface gap between stacked fills; only the top segment gets rounded ends.
+          const h = Math.max(1, y0 - y1 - (idx > 0 ? 2 : 0));
+          const isTop = idx === segments.length - 1;
+          col.append(el("svg:rect", { x: cx - barW / 2, y: y1, width: barW, height: h, rx: isTop ? 4 : 0, fill: s.color }));
+          if (isTop && h > 4) col.append(el("svg:rect", { x: cx - barW / 2, y: y1 + Math.min(4, h / 2), width: barW, height: h - Math.min(4, h / 2), fill: s.color }));
+          acc += v;
+        });
+        const hit = el("svg:rect", { class: "hit", x: cx - slot / 2, y: padT, width: slot, height: plotH });
+        hit.addEventListener("mousemove", (e) => showTip(e, SERIES.map((s) => ({ label: s.label, value: d[s.key], color: s.color })).concat([{ label: "Views", value: d.impressions }]), d.day));
+        hit.addEventListener("mouseleave", hideTip);
+        col.append(hit);
+        svg.append(col);
+        if (i % labelEvery === 0 || i === daily.length - 1) {
+          svg.append(el("svg:text", { x: cx, y: H - 6, "text-anchor": "middle", text: d.day.slice(5) }));
+        }
+      });
+
+      $("daily").replaceChildren(totals.every((t) => t === 0) ? el("div", { class: "empty", text: "No clicks in this period yet." }) : svg);
+    }
+
+    // ---------- tables ----------
+    function table(headers, rows) {
+      return el("s-table", {},
+        el("s-table-header-row", {}, headers.map((h) => el("s-table-header", { text: h }))),
+        el("s-table-body", {}, rows.map((cells) => el("s-table-row", {}, cells.map((c) => el("s-table-cell", {}, c))))));
+    }
+
+    let lastProducts = [];
+
+    function renderProducts(products) {
+      lastProducts = products;
+      if (!products.length) {
+        $("products").replaceChildren(el("div", { class: "empty", text: "No product views tracked yet." }));
+        return;
+      }
+      $("products").replaceChildren(
+        table(
+          ["Product", "Views", "Noon", "Raya", "WhatsApp", "Click-out", "Black Mint", "Noon price", "Raya price"],
+          products.slice(0, 25).map((p) => [
+            el("div", {},
+              el("s-link", { href: `shopify://admin/products/${p.productId}`, text: p.title }),
+              p.topVariants.length
+                ? el("div", { class: "variants", text: p.topVariants.slice(0, 3).map((v) => `${v.title || "Default"}: ${v.clicks}`).join(" · ") })
+                : null),
+            el("span", { class: "num", text: int.format(p.impressions) }),
+            el("span", { class: "num", text: int.format(p.noon) }),
+            el("span", { class: "num", text: int.format(p.raya) }),
+            el("span", { class: "num", text: int.format(p.whatsapp) }),
+            el("span", { class: "num", text: p.outboundRate == null ? "—" : `${p.outboundRate}%` }),
+            el("span", { class: "num", text: money(p.bmPriceMinor) }),
+            el("span", { class: "num", text: money(p.noonPriceMinor) }),
+            el("span", { class: "num", text: money(p.rayaPriceMinor) }),
+          ]),
+        ),
+      );
+    }
+
+    function shareRows(map, labels) {
+      const entries = Object.entries(map).map(([k, c]) => [k, c.noon + c.raya + c.whatsapp]);
+      const total = entries.reduce((s, [, v]) => s + v, 0);
+      if (!total) return [el("div", { class: "empty", text: "No clicks yet." })];
+      return entries.sort((a, b) => b[1] - a[1]).map(([k, v]) =>
+        el("div", { class: "bar-row" },
+          el("span", { text: labels[k] || k }),
+          el("div", { class: "bar-track" }, el("div", { class: "bar-fill", style: { width: `${(v / total) * 100}%` } })),
+          el("span", { class: "num muted", text: `${int.format(v)} · ${Math.round((v / total) * 100)}%` })));
+    }
+
+    function renderHours(hours) {
+      const W = 300, H = 110, padB = 16;
+      const max = Math.max(1, ...hours);
+      const slot = W / 24;
+      const svg = el("svg:svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Clicks by hour of day" });
+      hours.forEach((v, h) => {
+        const bh = (v / max) * (H - padB - 4);
+        const g = el("svg:g", { class: "col" });
+        if (v > 0) g.append(el("svg:rect", { x: h * slot + 1, y: H - padB - bh, width: slot - 2, height: bh, rx: Math.min(2, bh / 2), fill: "var(--magnitude)" }));
+        const hit = el("svg:rect", { class: "hit", x: h * slot, y: 0, width: slot, height: H - padB });
+        hit.addEventListener("mousemove", (e) => showTip(e, [{ label: "Clicks", value: v }], `${String(h).padStart(2, "0")}:00`));
+        hit.addEventListener("mouseleave", hideTip);
+        g.append(hit);
+        svg.append(g);
+        if (h % 6 === 0) svg.append(el("svg:text", { x: h * slot + slot / 2, y: H - 3, "text-anchor": "middle", text: `${h}` }));
+      });
+      $("hours").replaceChildren(hours.every((v) => v === 0) ? el("div", { class: "empty", text: "No clicks yet." }) : svg);
+    }
+
+    // ---------- prices ----------
+    const STATUS = {
+      ok: { tone: "success", label: "Live" },
+      out_of_stock: { tone: "warning", label: "Out of stock" },
+      failed: { tone: "critical", label: "Failed" },
+      pending: { tone: "neutral", label: "Waiting" },
+    };
+
+    function renderPrices(prices) {
+      const c = prices.counts;
+      $("priceBadges").replaceChildren(
+        el("s-badge", { tone: "success", text: `${c.ok} live` }),
+        c.outOfStock ? el("s-badge", { tone: "warning", text: `${c.outOfStock} out of stock` }) : null,
+        c.failed ? el("s-badge", { tone: "critical", text: `${c.failed} failed` }) : null,
+        c.pending ? el("s-badge", { tone: "neutral", text: `${c.pending} waiting` }) : null,
+      );
+
+      const run = prices.lastRun;
+      $("lastRun").textContent = run
+        ? `Last check ${when(run.finishedAt)} · ${run.processed} checked, ${run.remaining} still queued. Prices refresh automatically about every 12 hours.`
+        : "No price check has run yet. The first scheduled check runs within the hour.";
+
+      $("changes").replaceChildren(
+        prices.recentChanges.length
+          ? el("div", {},
+              el("s-heading", { text: "Recent price changes" }),
+              table(["When", "Product", "Seller", "Was", "Now"],
+                prices.recentChanges.slice(0, 10).map((ch) => [
+                  when(ch.at),
+                  ch.label,
+                  ch.seller === "noon" ? "Noon" : "Raya",
+                  el("span", { class: "num muted", text: money(ch.fromMinor) }),
+                  el("span", { class: `num ${ch.fromMinor && ch.toMinor > ch.fromMinor ? "bad" : "good"}`, text: money(ch.toMinor) }),
+                ])))
+          : null,
+      );
+
+      $("targets").replaceChildren(
+        prices.targets.length
+          ? el("div", {},
+              el("s-heading", { text: "Every tracked listing" }),
+              table(["Product", "Seller", "Their price", "vs Black Mint", "Status", "Last fetched"],
+                prices.targets.map((t) => {
+                  const s = STATUS[t.status] || STATUS.pending;
+                  const delta = t.priceMinor && t.bmPriceMinor ? t.priceMinor - t.bmPriceMinor : null;
+                  return [
+                    el("s-link", { href: t.url, target: "_blank", text: t.label }),
+                    t.seller === "noon" ? "Noon" : "Raya",
+                    el("span", { class: "num", text: money(t.priceMinor) }),
+                    delta == null
+                      ? "—"
+                      : el("span", {
+                          class: `num ${delta >= 0 ? "good" : "bad"}`,
+                          text: delta >= 0 ? `we're ${money(delta)} cheaper` : `they're ${money(-delta)} cheaper`,
+                        }),
+                    el("div", {}, el("s-badge", { tone: s.tone, text: s.label }), t.error ? el("div", { class: "variants", text: t.error }) : null),
+                    el("span", { class: "muted", text: when(t.fetchedAt) }),
+                  ];
+                })))
+          : el("div", { class: "empty", text: "No seller links found on any active product." }),
+      );
+    }
+
+    // ---------- load ----------
+    async function load() {
+      const days = $("range").value || "30";
+      try {
+        const data = await api(`${ENDPOINTS.dashboard}?days=${encodeURIComponent(days)}`);
+        const s = data.summary;
+        renderKpis(s.totals);
+        renderDaily(s.daily);
+        renderProducts(s.products);
+        $("locales").replaceChildren(...shareRows(s.locales, { en: "English", ar: "Arabic" }));
+        $("devices").replaceChildren(...shareRows(s.devices, { mobile: "Mobile", desktop: "Desktop", tablet: "Tablet" }));
+        renderHours(s.clickHours);
+        renderPrices(data.prices);
+        $("generated").textContent = `Updated ${when(data.generatedAt)}`;
+      } catch (error) {
+        shopify.toast.show("Could not load the dashboard", { isError: true });
+        $("generated").textContent = String(error.message || error);
+      }
+    }
+
+    $("range").addEventListener("change", load);
+
+    $("export").addEventListener("click", () => {
+      const header = ["product_id", "product", "views", "noon_clicks", "raya_clicks", "whatsapp_clicks", "click_out_rate", "black_mint_egp", "noon_egp", "raya_egp"];
+      const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const lines = [header.join(",")].concat(lastProducts.map((p) => [
+        p.productId, p.title, p.impressions, p.noon, p.raya, p.whatsapp, p.outboundRate ?? "",
+        p.bmPriceMinor ? p.bmPriceMinor / 100 : "", p.noonPriceMinor ? p.noonPriceMinor / 100 : "", p.rayaPriceMinor ? p.rayaPriceMinor / 100 : "",
+      ].map(esc).join(",")));
+      const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
+      const a = el("a", { href: url, download: `seller-clicks-${$("range").value}d.csv` });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+
+    $("refresh").addEventListener("click", async () => {
+      const button = $("refresh");
+      button.setAttribute("loading", "");
+      button.setAttribute("disabled", "");
+      let force = true;
+      let checked = 0;
+      try {
+        for (let round = 0; round < 30; round += 1) {
+          const report = await api(ENDPOINTS.refresh, { method: "POST", body: JSON.stringify({ force }) });
+          force = false;
+          checked += report.processed;
+          $("lastRun").textContent = `Refreshing… ${checked} checked, ${report.remaining} to go`;
+          if (report.remaining === 0 || report.processed === 0) break;
+        }
+        shopify.toast.show(`Prices refreshed (${checked} checked)`);
+      } catch (error) {
+        shopify.toast.show("Price refresh stopped early", { isError: true });
+      } finally {
+        button.removeAttribute("loading");
+        button.removeAttribute("disabled");
+        load();
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>
