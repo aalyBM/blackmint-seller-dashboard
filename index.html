@@ -128,6 +128,17 @@
       </div>
     </s-section>
 
+    <s-section heading="Where the clickers come from">
+      <s-text color="subdued">Traffic source of the visit in which the seller buttons were seen or clicked (UTM source, else the referring site). Collected from version 24 of the theme block onwards.</s-text>
+      <div id="sources"></div>
+    </s-section>
+
+    <s-section heading="After the click">
+      <s-text color="subdued">What visitors did after leaving for a seller. Orders are matched to anonymous visitor ids with analytics consent, so these are floors, not totals.</s-text>
+      <div class="kpis" id="afterKpis"></div>
+      <div id="behaviour"></div>
+    </s-section>
+
     <s-section heading="Seller prices">
       <s-stack gap="base">
         <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
@@ -411,6 +422,80 @@
       );
     }
 
+    // ---------- journeys ----------
+    const SELLER_LABEL = { noon: "Noon", raya: "Raya", jumia: "Jumia", whatsapp: "WhatsApp" };
+
+    function renderSources(sources) {
+      const rows = (sources || []).filter((r) => r.impressions || r.clicks);
+      if (!rows.length) {
+        $("sources").replaceChildren(el("div", { class: "empty", text: "No source data yet. It starts with the first visits after the theme block update." }));
+        return;
+      }
+      $("sources").replaceChildren(
+        table(["Source", "Views", "Clicks", "Click-out", "Noon", "Raya", "Jumia", "WhatsApp"],
+          rows.map((r) => [
+            el("span", { text: r.source }),
+            el("span", { class: "num", text: int.format(r.impressions) }),
+            el("span", { class: "num", text: int.format(r.clicks) }),
+            el("span", { class: "num", text: r.impressions ? `${Math.round(((r.noon + r.raya + r.jumia) / r.impressions) * 1000) / 10}%` : "—" }),
+            el("span", { class: "num", text: int.format(r.noon) }),
+            el("span", { class: "num", text: int.format(r.raya) }),
+            el("span", { class: "num", text: int.format(r.jumia) }),
+            el("span", { class: "num", text: int.format(r.whatsapp) }),
+          ])),
+      );
+    }
+
+    function renderAfter(journeys) {
+      const o = journeys.orders;
+      const b = journeys.behaviour || [];
+      const returned = b.reduce((sum, r) => sum + r.returnedVisitors, 0);
+      const multi = b.reduce((sum, r) => sum + r.multiSellerVisitors, 0);
+      const tile = (label, value, note, color) =>
+        el("div", { class: "kpi" },
+          el("div", { class: "kpi__label" }, color ? el("span", { class: "swatch", style: { background: color } }) : null, label),
+          el("div", { class: "kpi__value", text: value }),
+          note ? el("div", { class: "kpi__note", text: note }) : null);
+      const tiles = [
+        tile("Came back after clicking out", int.format(returned), "visitors seen again an hour or more later"),
+        tile("Compared several sellers", int.format(multi), "visitors who clicked more than one seller"),
+      ];
+      if (o) {
+        tiles.push(
+          tile("Black Mint orders", int.format(o.orders), `${money(o.revenueMinor)} · last ${journeys.ordersWindowDays} days`),
+          tile("Ordered here after seeing sellers", int.format(o.sawSellers.orders), money(o.sawSellers.revenueMinor)),
+          tile("Clicked out, then ordered here", int.format(o.clickedThenOrdered.orders),
+            `${money(o.clickedThenOrdered.revenueMinor)} · ${o.clickers ? `${Math.round((o.clickersWhoOrdered / o.clickers) * 1000) / 10}% of clickers` : "no clickers yet"}`),
+          tile("Orders with a visitor id", int.format(o.tagged), "needs analytics consent; the rest cannot be matched"),
+        );
+      } else {
+        tiles.push(tile("Black Mint orders", "—", "orders could not be read"));
+      }
+      $("afterKpis").replaceChildren(...tiles);
+
+      if (!b.length) {
+        $("behaviour").replaceChildren(el("div", { class: "empty", text: "No clicks in this period." }));
+        return;
+      }
+      $("behaviour").replaceChildren(
+        el("div", { style: { marginTop: "16px" } },
+          el("s-heading", { text: "Per seller" }),
+          table(["Seller", "Clicks", "New visitors", "Returning", "Time on page before click", "Seller cheaper", "Seller dearer", "Avg gap vs Black Mint", "Came back", "Ordered here"],
+            b.map((r) => [
+              SELLER_LABEL[r.seller] || r.seller,
+              el("span", { class: "num", text: int.format(r.clicks) }),
+              el("span", { class: "num", text: int.format(r.newClicks) }),
+              el("span", { class: "num", text: int.format(r.returningClicks) }),
+              el("span", { class: "num", text: r.medianSecondsOnPage == null ? "—" : `${r.medianSecondsOnPage}s median` }),
+              el("span", { class: "num", text: int.format(r.cheaperClicks) }),
+              el("span", { class: "num", text: int.format(r.dearerClicks) }),
+              el("span", { class: `num ${r.avgGapMinor == null ? "" : r.avgGapMinor > 0 ? "good" : "bad"}`, text: r.avgGapMinor == null ? "—" : `${r.avgGapMinor > 0 ? "+" : ""}${money(r.avgGapMinor)}` }),
+              el("span", { class: "num", text: int.format(r.returnedVisitors) }),
+              el("span", { class: "num", text: int.format((o && o.clickedThenOrdered.bySeller[r.seller]) || 0) }),
+            ]))),
+      );
+    }
+
     // ---------- load ----------
     async function load() {
       const days = $("range").value || "30";
@@ -423,6 +508,8 @@
         $("locales").replaceChildren(...shareRows(s.locales, { en: "English", ar: "Arabic" }));
         $("devices").replaceChildren(...shareRows(s.devices, { mobile: "Mobile", desktop: "Desktop", tablet: "Tablet" }));
         renderHours(s.clickHours);
+        renderSources(data.journeys && data.journeys.sources);
+        renderAfter(data.journeys || { sources: [], behaviour: [], orders: null, ordersWindowDays: 0 });
         renderPrices(data.prices);
         $("generated").textContent = `Updated ${when(data.generatedAt)}`;
       } catch (error) {
