@@ -87,6 +87,10 @@
     .bar-fill { height: 100%; background: var(--magnitude); border-radius: 4px; }
     .empty { padding: 24px; text-align: center; color: var(--text-muted); }
     .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; justify-content: space-between; }
+    .dates { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; width: 100%; }
+    .dates[hidden] { display: none; }
+    .dates label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-secondary); }
+    .dates input { font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-1); color: var(--text-primary); }
   </style>
 </head>
 <body>
@@ -98,7 +102,13 @@
           <s-option value="7">Last 7 days</s-option>
           <s-option value="30" selected>Last 30 days</s-option>
           <s-option value="90">Last 90 days</s-option>
+          <s-option value="custom">Custom range…</s-option>
         </s-select>
+        <div class="dates" id="dates" hidden>
+          <label>From <input type="date" id="from"></label>
+          <label>To <input type="date" id="to"></label>
+          <s-button id="apply" variant="secondary">Apply</s-button>
+        </div>
         <s-text id="generated" color="subdued"></s-text>
       </div>
     </s-section>
@@ -375,12 +385,13 @@
 
     function renderPrices(prices) {
       const c = prices.counts;
-      $("priceBadges").replaceChildren(
+      // replaceChildren renders a null child as the text "null"; keep only real badges.
+      $("priceBadges").replaceChildren(...[
         el("s-badge", { tone: "success", text: `${c.ok} live` }),
         c.outOfStock ? el("s-badge", { tone: "warning", text: `${c.outOfStock} out of stock` }) : null,
         c.failed ? el("s-badge", { tone: "critical", text: `${c.failed} failed` }) : null,
         c.pending ? el("s-badge", { tone: "neutral", text: `${c.pending} waiting` }) : null,
-      );
+      ].filter(Boolean));
 
       const run = prices.lastRun;
       $("lastRun").textContent = run
@@ -533,10 +544,23 @@
     }
 
     // ---------- load ----------
+    /** Cairo calendar day, YYYY-MM-DD. */
+    const cairoDay = (d) => new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo" }).format(d);
+
+    function periodQuery() {
+      const choice = $("range").value || "30";
+      if (choice !== "custom") return `days=${encodeURIComponent(choice)}`;
+      const from = $("from").value;
+      const to = $("to").value || cairoDay(new Date());
+      if (!from) return null;
+      return `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    }
+
     async function load() {
-      const days = $("range").value || "30";
+      const query = periodQuery();
+      if (!query) return;
       try {
-        const data = await api(`${ENDPOINTS.dashboard}?days=${encodeURIComponent(days)}`);
+        const data = await api(`${ENDPOINTS.dashboard}?${query}`);
         const s = data.summary;
         renderKpis(s.totals);
         renderDaily(s.daily);
@@ -555,7 +579,20 @@
       }
     }
 
-    $("range").addEventListener("change", load);
+    $("range").addEventListener("change", () => {
+      const custom = $("range").value === "custom";
+      $("dates").hidden = !custom;
+      if (custom) {
+        const today = cairoDay(new Date());
+        if (!$("to").value) $("to").value = today;
+        if (!$("from").value) $("from").value = cairoDay(new Date(Date.now() - 29 * 864e5));
+        $("to").max = today;
+        $("from").max = today;
+      }
+      load();
+    });
+    $("apply").addEventListener("click", load);
+    for (const id of ["from", "to"]) $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
 
     $("export").addEventListener("click", () => {
       const header = ["product_id", "product", "views", "noon_clicks", "raya_clicks", "jumia_clicks", "whatsapp_clicks", "click_out_rate", "black_mint_egp", "noon_egp", "raya_egp", "jumia_egp"];
@@ -565,7 +602,7 @@
         p.bmPriceMinor ? p.bmPriceMinor / 100 : "", p.noonPriceMinor ? p.noonPriceMinor / 100 : "", p.rayaPriceMinor ? p.rayaPriceMinor / 100 : "", p.jumiaPriceMinor ? p.jumiaPriceMinor / 100 : "",
       ].map(esc).join(",")));
       const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
-      const a = el("a", { href: url, download: `seller-clicks-${$("range").value}d.csv` });
+      const a = el("a", { href: url, download: `seller-clicks-${$("range").value === "custom" ? `${$("from").value}_${$("to").value}` : `${$("range").value}d`}.csv` });
       document.body.append(a);
       a.click();
       a.remove();
