@@ -8,7 +8,7 @@
   <!-- App Bridge must be the first script, loaded synchronously. -->
   <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
   <script src="https://cdn.shopify.com/shopifycloud/polaris.js"></script>
-  <!-- Where the API lives. Absent on Netlify (same-origin /api/*); set on GitHub Pages. -->
+  <!-- Where the API lives: the Supabase function URLs, set in config.js. -->
   <script src="config.js" onerror="window.BM_CONFIG = window.BM_CONFIG || {}"></script>
   <style>
     :root {
@@ -23,6 +23,8 @@
       /* Validated chart palette: brand hues stepped into the readable band. */
       --series-noon: #b88c00;
       --series-raya: #094dec;
+      /* Jumia #f68b1e stepped down to 4:1 on white, and away from Noon's gold. */
+      --series-jumia: #d4570f;
       --series-whatsapp: #168a4a;
       --magnitude: #094dec;
     }
@@ -145,8 +147,10 @@
     const SERIES = [
       { key: "noon", label: "Noon", color: "var(--series-noon)" },
       { key: "raya", label: "Raya", color: "var(--series-raya)" },
+      { key: "jumia", label: "Jumia", color: "var(--series-jumia)" },
       { key: "whatsapp", label: "WhatsApp (Black Mint)", color: "var(--series-whatsapp)" },
     ];
+    const SELLER_NAMES = { noon: "Noon", raya: "Raya", jumia: "Jumia", whatsapp: "WhatsApp" };
 
     const $ = (id) => document.getElementById(id);
     const egp = new Intl.NumberFormat("en-EG", { maximumFractionDigits: 0 });
@@ -215,9 +219,10 @@
       $("kpis").replaceChildren(
         tile("Noon clicks", int.format(t.noon), null, "var(--series-noon)"),
         tile("Raya clicks", int.format(t.raya), null, "var(--series-raya)"),
+        tile("Jumia clicks", int.format(t.jumia ?? 0), null, "var(--series-jumia)"),
         tile("WhatsApp orders", int.format(t.whatsapp), "Black Mint's own button", "var(--series-whatsapp)"),
         tile("Button views", int.format(t.impressions), "seller buttons on screen"),
-        tile("Click-out rate", t.outboundRate == null ? "—" : `${t.outboundRate}%`, "Noon + Raya clicks ÷ views"),
+        tile("Click-out rate", t.outboundRate == null ? "—" : `${t.outboundRate}%`, "Noon + Raya + Jumia clicks ÷ views"),
         tile("People who clicked", int.format(t.uniqueClickers), "anonymous, where analytics consent was given"),
       );
     }
@@ -228,7 +233,7 @@
 
       const W = 760, H = 220, padL = 36, padB = 24, padT = 8;
       const plotW = W - padL, plotH = H - padB - padT;
-      const totals = daily.map((d) => d.noon + d.raya + d.whatsapp);
+      const totals = daily.map((d) => d.noon + d.raya + (d.jumia ?? 0) + d.whatsapp);
       const max = Math.max(1, ...totals);
       const step = Math.max(1, Math.ceil(max / 4));
       const top = step * 4;
@@ -291,7 +296,7 @@
       }
       $("products").replaceChildren(
         table(
-          ["Product", "Views", "Noon", "Raya", "WhatsApp", "Click-out", "Black Mint", "Noon price", "Raya price"],
+          ["Product", "Views", "Noon", "Raya", "Jumia", "WhatsApp", "Click-out", "Black Mint", "Noon price", "Raya price", "Jumia price"],
           products.slice(0, 25).map((p) => [
             el("div", {},
               el("s-link", { href: `shopify://admin/products/${p.productId}`, text: p.title }),
@@ -301,18 +306,20 @@
             el("span", { class: "num", text: int.format(p.impressions) }),
             el("span", { class: "num", text: int.format(p.noon) }),
             el("span", { class: "num", text: int.format(p.raya) }),
+            el("span", { class: "num", text: int.format(p.jumia ?? 0) }),
             el("span", { class: "num", text: int.format(p.whatsapp) }),
             el("span", { class: "num", text: p.outboundRate == null ? "—" : `${p.outboundRate}%` }),
             el("span", { class: "num", text: money(p.bmPriceMinor) }),
             el("span", { class: "num", text: money(p.noonPriceMinor) }),
             el("span", { class: "num", text: money(p.rayaPriceMinor) }),
+            el("span", { class: "num", text: money(p.jumiaPriceMinor) }),
           ]),
         ),
       );
     }
 
     function shareRows(map, labels) {
-      const entries = Object.entries(map).map(([k, c]) => [k, c.noon + c.raya + c.whatsapp]);
+      const entries = Object.entries(map).map(([k, c]) => [k, c.noon + c.raya + (c.jumia ?? 0) + c.whatsapp]);
       const total = entries.reduce((s, [, v]) => s + v, 0);
       if (!total) return [el("div", { class: "empty", text: "No clicks yet." })];
       return entries.sort((a, b) => b[1] - a[1]).map(([k, v]) =>
@@ -371,7 +378,7 @@
                 prices.recentChanges.slice(0, 10).map((ch) => [
                   when(ch.at),
                   ch.label,
-                  ch.seller === "noon" ? "Noon" : "Raya",
+                  SELLER_NAMES[ch.seller] ?? ch.seller,
                   el("span", { class: "num muted", text: money(ch.fromMinor) }),
                   el("span", { class: `num ${ch.fromMinor && ch.toMinor > ch.fromMinor ? "bad" : "good"}`, text: money(ch.toMinor) }),
                 ])))
@@ -388,7 +395,7 @@
                   const delta = t.priceMinor && t.bmPriceMinor ? t.priceMinor - t.bmPriceMinor : null;
                   return [
                     el("s-link", { href: t.url, target: "_blank", text: t.label }),
-                    t.seller === "noon" ? "Noon" : "Raya",
+                    SELLER_NAMES[t.seller] ?? t.seller,
                     el("span", { class: "num", text: money(t.priceMinor) }),
                     delta == null
                       ? "—"
@@ -427,11 +434,11 @@
     $("range").addEventListener("change", load);
 
     $("export").addEventListener("click", () => {
-      const header = ["product_id", "product", "views", "noon_clicks", "raya_clicks", "whatsapp_clicks", "click_out_rate", "black_mint_egp", "noon_egp", "raya_egp"];
+      const header = ["product_id", "product", "views", "noon_clicks", "raya_clicks", "jumia_clicks", "whatsapp_clicks", "click_out_rate", "black_mint_egp", "noon_egp", "raya_egp", "jumia_egp"];
       const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
       const lines = [header.join(",")].concat(lastProducts.map((p) => [
-        p.productId, p.title, p.impressions, p.noon, p.raya, p.whatsapp, p.outboundRate ?? "",
-        p.bmPriceMinor ? p.bmPriceMinor / 100 : "", p.noonPriceMinor ? p.noonPriceMinor / 100 : "", p.rayaPriceMinor ? p.rayaPriceMinor / 100 : "",
+        p.productId, p.title, p.impressions, p.noon, p.raya, p.jumia ?? 0, p.whatsapp, p.outboundRate ?? "",
+        p.bmPriceMinor ? p.bmPriceMinor / 100 : "", p.noonPriceMinor ? p.noonPriceMinor / 100 : "", p.rayaPriceMinor ? p.rayaPriceMinor / 100 : "", p.jumiaPriceMinor ? p.jumiaPriceMinor / 100 : "",
       ].map(esc).join(",")));
       const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
       const a = el("a", { href: url, download: `seller-clicks-${$("range").value}d.csv` });
