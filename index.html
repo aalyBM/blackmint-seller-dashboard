@@ -139,6 +139,12 @@
       <div id="behaviour"></div>
     </s-section>
 
+    <s-section heading="Sales on other sellers (inferred from stock)">
+      <s-text color="subdued">Black Mint sets its own stock on each seller, so a drop between two daily readings of a listing's public page is a unit sold there. Noon shows exact stock; Jumia shows at most "5 left", so Jumia sales only register below 5; Raya publishes no stock. Floors, not totals.</s-text>
+      <div class="kpis" id="salesKpis"></div>
+      <div id="sales"></div>
+    </s-section>
+
     <s-section heading="Seller prices">
       <s-stack gap="base">
         <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
@@ -496,6 +502,36 @@
       );
     }
 
+    function renderSales(sales) {
+      const rows = sales || [];
+      const perSeller = {};
+      for (const r of rows) perSeller[r.seller] = (perSeller[r.seller] || 0) + r.units;
+      const tile = (label, value, note, color) =>
+        el("div", { class: "kpi" },
+          el("div", { class: "kpi__label" }, color ? el("span", { class: "swatch", style: { background: color } }) : null, label),
+          el("div", { class: "kpi__value", text: value }),
+          note ? el("div", { class: "kpi__note", text: note }) : null);
+      $("salesKpis").replaceChildren(
+        tile("Sold on Noon", int.format(perSeller.noon || 0), "units, from stock drops", "var(--series-noon)"),
+        tile("Sold on Jumia", int.format(perSeller.jumia || 0), "units, only visible under 5 in stock", "var(--series-jumia)"),
+        tile("Listings watched", int.format(rows.filter((r) => r.readings > 0).length), "with a stock reading in this period"),
+      );
+      const sold = rows.filter((r) => r.units > 0 || r.readings > 0).slice(0, 40);
+      $("sales").replaceChildren(
+        sold.length
+          ? table(["Listing", "Seller", "Units sold", "Stock at start", "Stock now", "Readings"],
+              sold.map((r) => [
+                r.label || r.key,
+                SELLER_LABEL[r.seller] || r.seller,
+                el("span", { class: `num ${r.units > 0 ? "good" : ""}`, text: int.format(r.units) }),
+                el("span", { class: "num", text: r.firstStock == null ? "—" : int.format(r.firstStock) }),
+                el("span", { class: "num", text: r.lastStock == null ? "—" : int.format(r.lastStock) }),
+                el("span", { class: "num muted", text: int.format(r.readings) }),
+              ]))
+          : el("div", { class: "empty", text: "No stock readings yet. The first daily sweep runs at 03:30 Cairo time; sales appear from the second reading." }),
+      );
+    }
+
     // ---------- load ----------
     async function load() {
       const days = $("range").value || "30";
@@ -510,6 +546,7 @@
         renderHours(s.clickHours);
         renderSources(data.journeys && data.journeys.sources);
         renderAfter(data.journeys || { sources: [], behaviour: [], orders: null, ordersWindowDays: 0 });
+        renderSales(data.journeys && data.journeys.sellerSales);
         renderPrices(data.prices);
         $("generated").textContent = `Updated ${when(data.generatedAt)}`;
       } catch (error) {
