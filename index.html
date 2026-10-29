@@ -149,6 +149,13 @@
       <div id="behaviour"></div>
     </s-section>
 
+    <s-section heading="Seller instalment offers">
+      <s-text color="subdued">The sellers' own instalment plans shown in the offers drawer (Jumia's Triple Zero first). "Went to seller" is the click-out with that plan on screen; the purchase itself happens on the seller and is not visible here. A plan is listed with its longest tenor that day. Sessions are shopper visits; visitors need analytics consent, so they can trail. The best plan needs 5+ viewing sessions and 3+ that went to the seller.</s-text>
+      <div class="kpis" id="offerKpis"></div>
+      <div id="offerPlans"></div>
+      <div id="offerCloses"></div>
+    </s-section>
+
     <s-section heading="Sales on other sellers (inferred from stock)">
       <s-text color="subdued">Black Mint sets its own stock on each seller, so a drop between two daily readings of a listing's public page is a unit sold there. Noon shows exact stock; Jumia shows at most "5 left", so Jumia sales only register below 5; Raya publishes no stock. Floors, not totals.</s-text>
       <div class="kpis" id="salesKpis"></div>
@@ -513,6 +520,81 @@
       );
     }
 
+    // ---------- seller offers ----------
+    const PROVIDER_LABEL = { valu: "valU", souhoola: "Souhoola", halan: "Halan", contact: "Contact", klivvr: "Klivvr", aman: "Aman",
+      forsa: "Forsa", premium: "Premium Card", nbe: "NBE", fab: "FAB Misr", alex: "Bank of Alexandria" };
+    const CLOSE_LABEL = { cta: "Went to seller", button: "Close button", backdrop: "Tapped outside", esc: "Esc key", leave: "Left the page", unknown: "Unknown" };
+    const pct = (r) => (r == null ? "—" : `${Math.round(r * 1000) / 10}%`);
+
+    function renderOffers(offers) {
+      if (offers === null) {
+        // The report itself failed (the API sends null); undefined is an older API with no report.
+        $("offerKpis").replaceChildren(el("div", { class: "empty", text: "Offer stats could not be read right now. Try Refresh in a minute." }));
+        $("offerPlans").replaceChildren();
+        $("offerCloses").replaceChildren();
+        return;
+      }
+      const o = offers || { sellers: [], plans: [], closes: [], best: {} };
+      const tile = (label, value, note) =>
+        el("div", { class: "kpi" }, el("div", { class: "kpi__label", text: label }), el("div", { class: "kpi__value", text: value }),
+          note ? el("div", { class: "kpi__note", text: note }) : null);
+      if (!o.sellers.length) {
+        $("offerKpis").replaceChildren(el("div", { class: "empty", text: "No offer activity yet. It starts once the offers drawer is live on product pages." }));
+        $("offerPlans").replaceChildren();
+        $("offerCloses").replaceChildren();
+        return;
+      }
+      const tiles = [];
+      for (const s of o.sellers) {
+        const name = SELLER_LABEL[s.seller] || s.seller;
+        const best = o.best[s.seller];
+        tiles.push(
+          tile(`${name}: tag seen`, int.format(s.tagSessions), `sessions · button click ${pct(s.tagClickRate)} with the tag vs ${pct(s.untaggedClickRate)} when it was not on screen (same period)`),
+          tile(`${name}: drawer opened`, int.format(s.openSessions), `${int.format(s.openVisitors)} visitors · median ${s.medianSecondsOpen == null ? "—" : `${s.medianSecondsOpen}s`} inside`),
+          tile(`${name}: went to seller from drawer`, int.format(s.drawerClickSessions), `sessions · ${pct(s.openToBuyRate)} of openers · ${int.format(s.drawerClickVisitors)} visitors`),
+          tile(`${name}: best plan`, best ? `${PROVIDER_LABEL[best.provider] || best.provider} · up to ${best.months}m` : "—",
+            best ? `${int.format(best.clickSessions)} of ${int.format(best.viewSessions)} viewing sessions went to ${name} (${pct(best.buyRate)})` : "needs 5+ viewing sessions and 3+ that went to the seller"),
+        );
+      }
+      $("offerKpis").replaceChildren(...tiles);
+
+      $("offerPlans").replaceChildren(
+        o.plans.length
+          ? el("div", { style: { marginTop: "16px" } },
+              el("s-heading", { text: "Plans: viewed → went to the seller with it on screen" }),
+              table(["Seller", "Plan", "Viewed (sessions)", "Viewed (visitors)", "Went to seller (sessions)", "Went to seller (visitors)", "Click-out rate", "Clicks", "Avg monthly shown"],
+                o.plans.map((p) => {
+                  const isBest = o.best[p.seller] && o.best[p.seller].provider === p.provider && o.best[p.seller].months === p.months;
+                  return [
+                    SELLER_LABEL[p.seller] || p.seller,
+                    el("span", { class: isBest ? "good" : "", text: `${PROVIDER_LABEL[p.provider] || p.provider} · up to ${p.months} months${isBest ? " ★" : ""}` }),
+                    el("span", { class: "num", text: int.format(p.viewSessions) }),
+                    el("span", { class: "num", text: int.format(p.viewVisitors) }),
+                    el("span", { class: "num", text: int.format(p.clickSessions) }),
+                    el("span", { class: "num", text: int.format(p.clickVisitors) }),
+                    el("span", { class: `num ${isBest ? "good" : ""}`, text: pct(p.buyRate) }),
+                    el("span", { class: "num muted", text: int.format(p.clicks) }),
+                    el("span", { class: "num", text: money(p.avgMonthlyMinor) }),
+                  ];
+                })))
+          : el("div", { class: "empty", text: "No plan has been viewed yet." }),
+      );
+
+      $("offerCloses").replaceChildren(
+        o.closes.length
+          ? el("div", { style: { marginTop: "16px" } },
+              el("s-heading", { text: "How the drawer was left" }),
+              table(["Seller", "Ended by", "Times", "Median time inside"],
+                o.closes.map((c) => [
+                  SELLER_LABEL[c.seller] || c.seller,
+                  CLOSE_LABEL[c.method] || c.method,
+                  el("span", { class: "num", text: int.format(c.count) }),
+                  el("span", { class: "num", text: c.medianSeconds == null ? "—" : `${c.medianSeconds}s` }),
+                ])))
+          : el("div"),
+      );
+    }
+
     function renderSales(sales) {
       const rows = sales || [];
       const perSeller = {};
@@ -570,6 +652,7 @@
         renderHours(s.clickHours);
         renderSources(data.journeys && data.journeys.sources);
         renderAfter(data.journeys || { sources: [], behaviour: [], orders: null, ordersWindowDays: 0 });
+        renderOffers(data.journeys && data.journeys.offers);
         renderSales(data.journeys && data.journeys.sellerSales);
         renderPrices(data.prices);
         $("generated").textContent = `Updated ${when(data.generatedAt)}`;
